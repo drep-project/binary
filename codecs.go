@@ -112,23 +112,18 @@ type byteArrayCodec struct{}
 
 // Encode encodes a value into the encoder.
 func (c *byteArrayCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
-	arr := make([]byte, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		ele := rv.Index(i).Interface().(byte)
-		arr[i] = ele
-	}
-	e.Write(arr)
+	arr :=  reflect.MakeSlice(reflect.TypeOf([]byte{}), rv.Len(), rv.Len())
+	reflect.Copy(arr, rv)
+	e.Write(arr.Bytes())
 	return
 }
 
 // Decode decodes into a reflect value from the decoder.
 func (c *byteArrayCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	l := rv.Len()
-	byteArray := make([]byte, l) //rv.Interface().([l]byte)
+	byteArray := make([]byte, l)
 	if _, err = d.Read(byteArray[:]); err == nil {
-		for index, val := range byteArray {
-			rv.Index(index).Set(reflect.ValueOf(val))
-		}
+		reflect.Copy(rv, reflect.ValueOf(byteArray))
 	}
 	return
 }
