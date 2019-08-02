@@ -10,6 +10,10 @@ import (
 	"reflect"
 )
 
+var (
+	MAXSLICESIZE = ^uint(0) >> 1
+)
+
 // Constants
 var (
 	LittleEndian = binary.LittleEndian
@@ -74,11 +78,15 @@ func (c *reflectSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
 func (c *reflectSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l uint64
 	if l, err = binary.ReadUvarint(d.r); err == nil && l > 0 {
-		rv.Set(reflect.MakeSlice(rv.Type(), int(l), int(l)))
-		for i := 0; i < int(l); i++ {
-			if err = c.elemCodec.DecodeTo(d, rv.Index(i)); err != nil {
-				return
+		if l < uint64(MAXSLICESIZE) {
+			rv.Set(reflect.MakeSlice(rv.Type(), int(l), int(l)))
+			for i := 0; i < int(l); i++ {
+				if err = c.elemCodec.DecodeTo(d, rv.Index(i)); err != nil {
+					return
+				}
 			}
+		}else {
+			panic(errors.New("slice len exceed max size"))
 		}
 	}
 	return
@@ -100,9 +108,13 @@ func (c *byteSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
 func (c *byteSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l uint64
 	if l, err = d.ReadUvarint(); err == nil && l > 0 {
-		data := make([]byte, int(l), int(l))
-		if _, err = d.Read(data); err == nil {
-			rv.Set(reflect.ValueOf(data))
+		if l < uint64(MAXSLICESIZE) {
+			data := make([]byte, int(l), int(l))
+			if _, err = d.Read(data); err == nil {
+				rv.Set(reflect.ValueOf(data))
+			}
+		}else {
+			panic(errors.New("slice len exceed max size"))
 		}
 	}
 	return
@@ -112,9 +124,13 @@ type byteArrayCodec struct{}
 
 // Encode encodes a value into the encoder.
 func (c *byteArrayCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
-	arr :=  reflect.MakeSlice(reflect.TypeOf([]byte{}), rv.Len(), rv.Len())
-	reflect.Copy(arr, rv)
-	e.Write(arr.Bytes())
+	if rv.CanAddr() {
+		e.Write(rv.Slice(0, rv.Len()).Bytes())
+	}else{
+		arr := reflect.MakeSlice(reflect.TypeOf([]byte{}),rv.Len(), rv.Len())
+		reflect.Copy(arr, rv)
+		e.Write(arr.Bytes())
+	}
 	return
 }
 
@@ -147,9 +163,13 @@ func (c *boolSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
 func (c *boolSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l uint64
 	if l, err = d.ReadUvarint(); err == nil && l > 0 {
-		buf := make([]byte, l)
-		_, err = d.r.Read(buf)
-		rv.Set(reflect.ValueOf(binaryToBools(&buf)))
+		if l < uint64(MAXSLICESIZE) {
+			buf := make([]byte, l)
+			_, err = d.r.Read(buf)
+			rv.Set(reflect.ValueOf(binaryToBools(&buf)))
+		}else {
+			panic(errors.New("slice len exceed max size"))
+		}
 	}
 	return
 }
@@ -200,15 +220,18 @@ func (c *varintSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
 func (c *varintSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l uint64
 	if l, err = binary.ReadUvarint(d.r); err == nil && l > 0 {
-		slice := reflect.MakeSlice(rv.Type(), int(l), int(l))
-		for i := 0; i < int(l); i++ {
-			var v int64
-			if v, err = binary.ReadVarint(d.r); err == nil {
-				slice.Index(i).SetInt(v)
+		if l < uint64(MAXSLICESIZE) {
+			slice := reflect.MakeSlice(rv.Type(), int(l), int(l))
+			for i := 0; i < int(l); i++ {
+				var v int64
+				if v, err = binary.ReadVarint(d.r); err == nil {
+					slice.Index(i).SetInt(v)
+				}
 			}
+			rv.Set(slice)
+		}else {
+			panic(errors.New("slice len exceed max size"))
 		}
-
-		rv.Set(slice)
 	}
 	return
 }
@@ -253,14 +276,17 @@ func (c *varuintSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err error) {
 func (c *varuintSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l, v uint64
 	if l, err = binary.ReadUvarint(d.r); err == nil && l > 0 {
-		slice := reflect.MakeSlice(rv.Type(), int(l), int(l))
-		for i := 0; i < int(l); i++ {
-			if v, err = d.ReadUvarint(); err == nil {
-				slice.Index(i).SetUint(v)
+		if l < uint64(MAXSLICESIZE) {
+			slice := reflect.MakeSlice(rv.Type(), int(l), int(l))
+			for i := 0; i < int(l); i++ {
+				if v, err = d.ReadUvarint(); err == nil {
+					slice.Index(i).SetUint(v)
+				}
 			}
+			rv.Set(slice)
+		}else {
+			panic(errors.New("slice len exceed max size"))
 		}
-
-		rv.Set(slice)
 	}
 	return
 }
@@ -717,8 +743,8 @@ type bigIntCodec struct{}
 
 // Encode encodes a value into the encoder.
 func (c *bigIntCodec) EncodeTo(e *Encoder, rv reflect.Value) error {
-	fff := rv.Interface().(big.Int)
-	contents := fff.Bytes()
+	val := rv.Interface().(big.Int)
+	contents := val.Bytes()
 	e.WriteUvarint(uint64(len(contents)))
 	e.Write(contents)
 	return nil
@@ -730,14 +756,17 @@ func (c *bigIntCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	if err != nil {
 		return err
 	}
-	contents := make([]byte, len)
-	_, err = d.Read(contents)
-	if err != nil {
-		return err
+	if len < uint64(MAXSLICESIZE) {
+		contents := make([]byte, len)
+		_, err = d.Read(contents)
+		if err != nil {
+			return err
+		}
+		rv.Set(reflect.ValueOf(*new(big.Int).SetBytes(contents)))
+		return nil
+	}else {
+		panic(errors.New("slice len exceed max size"))
 	}
-
-	rv.Set(reflect.ValueOf(*new(big.Int).SetBytes(contents)))
-	return nil
 }
 
 //
@@ -758,7 +787,6 @@ func (c *reflectInterfaceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err erro
 		}
 		realCodeC.EncodeTo(e, realValue)
 	}
-
 	return
 }
 
@@ -852,7 +880,6 @@ func (c *reflectInterfaceSliceCodec) EncodeTo(e *Encoder, rv reflect.Value) (err
 func (c *reflectInterfaceSliceCodec) DecodeTo(d *Decoder, rv reflect.Value) (err error) {
 	var l uint64
 	if l, err = binary.ReadUvarint(d.r); err == nil && l > 0 {
-		//rv.Set(reflect.MakeSlice(rv.Type(), int(l), int(l)))
 		for i := 0; i < int(l); i++ {
 			isNil, err := d.ReadBool()
 			if err != nil {
