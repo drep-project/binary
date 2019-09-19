@@ -6,7 +6,6 @@ package binary
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
 	"reflect"
 )
@@ -527,9 +526,7 @@ func (c *reflectMapCodec) writeKey(e *Encoder, key reflect.Value) (err error) {
 
 // Read key reads a key from the decoder
 func (c *reflectMapCodec) readKey(d *Decoder, keyType reflect.Type) (key reflect.Value, err error) {
-	fmt.Println("readkey:",keyType.Kind())
 	switch keyType.Kind() {
-
 	case reflect.Int16:
 		var v uint16
 		if v, err = d.ReadUint16(); err == nil {
